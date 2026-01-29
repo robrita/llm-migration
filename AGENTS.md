@@ -42,18 +42,25 @@ make format     # Auto-fix + format (idempotent, safe to run repeatedly)
 ## Chart Width Configuration
 
 ### General Streamlit Charts
-For most Streamlit chart components, use `width="stretch"` instead of the deprecated `use_container_width=True`.
+The `use_container_width` parameter is deprecated. Use the `width` parameter instead:
+
+| Deprecated | Modern Equivalent |
+|------------|-------------------|
+| `use_container_width=True` | `width="stretch"` |
+| `use_container_width=False` | `width="content"` |
 
 **Correct:**
 ```python
+st.dataframe(df, width="stretch")      # Full container width
 st.line_chart(data, width="stretch")
-st.bar_chart(data, width="stretch")
+st.bar_chart(data, width="content")    # Fit to content
 ```
 
 **Incorrect (deprecated):**
 ```python
+st.dataframe(df, use_container_width=True)
 st.line_chart(data, use_container_width=True)
-st.bar_chart(data, use_container_width=True)
+st.bar_chart(data, use_container_width=False)
 ```
 
 ### Plotly Charts (st.plotly_chart)
@@ -71,8 +78,9 @@ st.plotly_chart(fig, use_container_width=True)  # Deprecated
 ```
 
 ### Why This Matters
-- `use_container_width=True` is deprecated across Streamlit components
-- `width="stretch"` is the modern approach for general charts
+- `use_container_width` parameter is deprecated across Streamlit components
+- `width="stretch"` replaces `use_container_width=True` (full container width)
+- `width="content"` replaces `use_container_width=False` (fit to content)
 - `st.plotly_chart()` uses Plotly's native configuration system via the `config` parameter
 - Following these guidelines avoids deprecation warnings and ensures future compatibility
 
