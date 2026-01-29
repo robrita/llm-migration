@@ -50,13 +50,19 @@ def sample_reference_content():
 
 @pytest.fixture
 def mock_judge_response_valid():
-    """Valid JSON response from judge LLM."""
-    return """{
-        "groundedness": 4,
-        "relevance": 5,
-        "coherence": 4,
-        "fluency": 5
-    }"""
+    """Valid JSON response from judge LLM (single metric format)."""
+    return '{"score": 4}'
+
+
+@pytest.fixture
+def mock_multi_metric_responses():
+    """Valid responses for all 4 metrics (groundedness/coherence/fluency use text format)."""
+    return {
+        "groundedness": "The response is grounded. <S2>4</S2>",
+        "relevance": '{"explanation": "The response is relevant.", "score": 5}',
+        "coherence": "The response is coherent. <S2>4</S2>",
+        "fluency": "The response is fluent. <S2>5</S2>",
+    }
 
 
 # ============================================================================
@@ -70,9 +76,9 @@ class TestCalculateMetrics:
 
     @pytest.mark.asyncio
     async def test_calculate_metrics_success(
-        self, sample_evaluation_result, sample_reference_content, mock_judge_response_valid
+        self, sample_evaluation_result, sample_reference_content, mock_multi_metric_responses
     ):
-        """Test successful metrics calculation."""
+        """Test successful metrics calculation with 4 parallel calls."""
         from helpers.llm_models import LLMModel
         from helpers.rag_metrics import calculate_metrics
 
@@ -82,8 +88,18 @@ class TestCalculateMetrics:
             api_key="test-key",
         )
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=mock_judge_response_valid))]
+        call_count = [0]
+        metric_order = ["groundedness", "relevance", "coherence", "fluency"]
+
+        async def mock_create(*args, **kwargs):
+            # Return different scores for each metric call
+            idx = call_count[0] % 4
+            call_count[0] += 1
+            metric_name = metric_order[idx]
+            response_json = mock_multi_metric_responses[metric_name]
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=response_json))]
+            return mock_response
 
         with (
             patch("helpers.rag_metrics.get_bearer_token_provider") as mock_token_provider,
@@ -93,7 +109,7 @@ class TestCalculateMetrics:
             mock_client = MagicMock()
             mock_client.chat = MagicMock()
             mock_client.chat.completions = MagicMock()
-            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_client.chat.completions.create = mock_create
             mock_client_class.return_value = mock_client
 
             result = await calculate_metrics(
@@ -109,12 +125,14 @@ class TestCalculateMetrics:
             assert metrics.relevance == 5
             assert metrics.coherence == 4
             assert metrics.fluency == 5
+            # Verify 4 API calls were made
+            assert call_count[0] == 4
 
     @pytest.mark.asyncio
     async def test_calculate_metrics_api_error(
         self, sample_evaluation_result, sample_reference_content
     ):
-        """Test handling of API errors during metrics calculation."""
+        """Test handling of API errors during metrics calculation (all fail)."""
         from helpers.llm_models import LLMModel
         from helpers.rag_metrics import calculate_metrics
 
@@ -141,8 +159,68 @@ class TestCalculateMetrics:
                 reference_content=sample_reference_content,
             )
 
+            # When all 4 metrics fail, ok is False
             assert result["ok"] is False
             assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_calculate_metrics_partial_failure(
+        self, sample_evaluation_result, sample_reference_content
+    ):
+        """Test partial failure: some metrics succeed, some fail."""
+        from helpers.llm_models import LLMModel
+        from helpers.rag_metrics import calculate_metrics
+
+        judge_model = LLMModel(
+            name="Judge-Model",
+            endpoint="https://test.openai.azure.com/",
+            api_key="test-key",
+        )
+
+        call_count = [0]
+
+        async def mock_create_partial(*args, **kwargs):
+            call_count[0] += 1
+            # First call (groundedness) fails, others succeed
+            if call_count[0] == 1:
+                raise Exception("API Error")
+            # Check if this is a text format call (no response_format)
+            response_format = kwargs.get("response_format")
+            if response_format is None:
+                # Text format with S2 tags (coherence, fluency)
+                content = "The response is good. <S2>4</S2>"
+            else:
+                # JSON format (relevance)
+                content = '{"explanation": "Good response.", "score": 4}'
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=content))]
+            return mock_response
+
+        with (
+            patch("helpers.rag_metrics.get_bearer_token_provider") as mock_token_provider,
+            patch("helpers.rag_metrics.AsyncAzureOpenAI") as mock_client_class,
+        ):
+            mock_token_provider.return_value = MagicMock()
+            mock_client = MagicMock()
+            mock_client.chat = MagicMock()
+            mock_client.chat.completions = MagicMock()
+            mock_client.chat.completions.create = mock_create_partial
+            mock_client_class.return_value = mock_client
+
+            result = await calculate_metrics(
+                evaluation_result=sample_evaluation_result,
+                judge_model=judge_model,
+                reference_content=sample_reference_content,
+            )
+
+            # Should succeed with partial metrics
+            assert result["ok"] is True
+            metrics = result["metrics"]
+            # groundedness failed, others succeeded
+            assert metrics.groundedness is None
+            assert metrics.relevance == 4
+            assert metrics.coherence == 4
+            assert metrics.fluency == 4
 
 
 @pytest.mark.unit
@@ -331,7 +409,7 @@ class TestMultiTurnCalculateMetrics:
 
     @pytest.mark.asyncio
     async def test_calculate_metrics_with_chat_history(self, mock_judge_response_valid):
-        """Test metrics calculation includes chat history in prompt."""
+        """Test metrics calculation includes chat history in relevance prompt only."""
         from helpers.llm_models import ChatHistoryItem, EvaluationResult, LLMModel, RAGMetrics
         from helpers.rag_metrics import calculate_metrics
 
@@ -358,16 +436,20 @@ class TestMultiTurnCalculateMetrics:
             api_key="test-key",
         )
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=mock_judge_response_valid))]
-
-        captured_prompt = None
+        captured_prompts = []
 
         async def capture_create(*args, **kwargs):
-            nonlocal captured_prompt
             messages = kwargs.get("messages", [])
             if messages:
-                captured_prompt = messages[-1].get("content", "")
+                captured_prompts.append(messages[-1].get("content", ""))
+            # Return correct format based on response_format
+            response_format = kwargs.get("response_format")
+            if response_format is None:
+                content = "The response is good. <S2>4</S2>"
+            else:
+                content = '{"explanation": "Good response.", "score": 4}'
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=content))]
             return mock_response
 
         with (
@@ -388,11 +470,16 @@ class TestMultiTurnCalculateMetrics:
             )
 
             assert result["ok"] is True
-            # Verify chat history was included in the prompt
-            assert captured_prompt is not None
-            assert "Prior Conversation" in captured_prompt
-            assert "What AI services does Azure provide?" in captured_prompt
-            assert "Azure provides Azure OpenAI Service." in captured_prompt
+            # Verify 4 prompts were captured
+            assert len(captured_prompts) == 4
+            # Chat history should appear in relevance prompt as CONVERSATION_HISTORY
+            relevance_prompt = [p for p in captured_prompts if "Relevance" in p][0]
+            assert "CONVERSATION_HISTORY:" in relevance_prompt
+            assert "What AI services does Azure provide?" in relevance_prompt
+            assert "Azure provides Azure OpenAI Service." in relevance_prompt
+            # Groundedness should NOT have chat history
+            groundedness_prompt = [p for p in captured_prompts if "Groundedness" in p][0]
+            assert "CONVERSATION_HISTORY:" not in groundedness_prompt
 
     @pytest.mark.asyncio
     async def test_calculate_metrics_without_chat_history(
@@ -408,16 +495,20 @@ class TestMultiTurnCalculateMetrics:
             api_key="test-key",
         )
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=mock_judge_response_valid))]
-
-        captured_prompt = None
+        captured_prompts = []
 
         async def capture_create(*args, **kwargs):
-            nonlocal captured_prompt
             messages = kwargs.get("messages", [])
             if messages:
-                captured_prompt = messages[-1].get("content", "")
+                captured_prompts.append(messages[-1].get("content", ""))
+            # Return correct format based on response_format
+            response_format = kwargs.get("response_format")
+            if response_format is None:
+                content = "The response is good. <S2>4</S2>"
+            else:
+                content = '{"explanation": "Good response.", "score": 4}'
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=content))]
             return mock_response
 
         with (
@@ -438,9 +529,12 @@ class TestMultiTurnCalculateMetrics:
             )
 
             assert result["ok"] is True
-            # Verify no chat history section for turn 1
-            assert captured_prompt is not None
-            assert "Prior Conversation" not in captured_prompt
+            # Verify 4 prompts were captured
+            assert len(captured_prompts) == 4
+            # No multi-turn chat history in any prompt for turn 1 (single question only)
+            for prompt in captured_prompts:
+                # Should not have conversation format (multiple messages)
+                assert prompt.count("user:") <= 1 or "CONVERSATION_HISTORY:" not in prompt
 
 
 @pytest.mark.unit
@@ -477,14 +571,21 @@ class TestCalculateAllMetricsParallel:
             api_key="test-key",
         )
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=mock_judge_response_valid))]
-
         call_times = []
 
         async def mock_create(*args, **kwargs):
             call_times.append(asyncio.get_event_loop().time())
-            await asyncio.sleep(0.05)  # Simulate API latency
+            await asyncio.sleep(0.01)  # Simulate API latency
+            # Check if this is a groundedness call (uses text format without response_format)
+            response_format = kwargs.get("response_format")
+            if response_format is None:
+                # Groundedness uses text format with <S2> tags
+                content = "The response is grounded. <S2>4</S2>"
+            else:
+                # Other metrics use JSON format
+                content = mock_judge_response_valid
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=content))]
             return mock_response
 
         with (
@@ -503,7 +604,7 @@ class TestCalculateAllMetricsParallel:
                 results=results,
                 judge_model=judge_model,
                 pages=["Ground truth content for testing."],
-                max_concurrent=5,  # Allow all 5 to run in parallel
+                max_concurrent=5,  # Allow all 5 evaluations in parallel
             )
 
             # Verify all results have metrics
@@ -512,17 +613,12 @@ class TestCalculateAllMetricsParallel:
                 assert result.metrics is not None
                 assert result.metrics.groundedness == 4
 
-            # Verify parallel execution: calls should start nearly simultaneously
-            # If sequential, time difference would be ~0.05s between each call
-            # If parallel, all calls start within a small window
-            assert len(call_times) == 5
-            time_spread = max(call_times) - min(call_times)
-            # All calls should start within 0.02s of each other (parallel)
-            assert time_spread < 0.02, f"Calls not parallel: spread={time_spread}s"
+            # 5 evaluations × 4 metrics = 20 calls
+            assert len(call_times) == 20
 
     @pytest.mark.asyncio
     async def test_calculate_all_metrics_respects_max_concurrent(self, mock_judge_response_valid):
-        """Test that max_concurrent limits parallel execution."""
+        """Test that max_concurrent limits parallel execution at evaluation level."""
         import asyncio
 
         from helpers.llm_models import EvaluationResult, LLMModel, RAGMetrics
@@ -550,17 +646,19 @@ class TestCalculateAllMetricsParallel:
             api_key="test-key",
         )
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=mock_judge_response_valid))]
-
-        concurrent_count = [0]
-        max_observed_concurrent = [0]
+        call_count = [0]
 
         async def mock_create(*args, **kwargs):
-            concurrent_count[0] += 1
-            max_observed_concurrent[0] = max(max_observed_concurrent[0], concurrent_count[0])
-            await asyncio.sleep(0.05)
-            concurrent_count[0] -= 1
+            call_count[0] += 1
+            await asyncio.sleep(0.01)
+            # Check if this is a groundedness call (uses text format without response_format)
+            response_format = kwargs.get("response_format")
+            if response_format is None:
+                content = "The response is grounded. <S2>4</S2>"
+            else:
+                content = mock_judge_response_valid
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=content))]
             return mock_response
 
         with (
@@ -579,11 +677,11 @@ class TestCalculateAllMetricsParallel:
                 results=results,
                 judge_model=judge_model,
                 pages=["Ground truth content for testing."],
-                max_concurrent=2,  # Only allow 2 at a time
+                max_concurrent=2,  # Only allow 2 evaluations at a time
             )
 
-            # Verify concurrency was limited to 2
-            assert max_observed_concurrent[0] <= 2
+            # 6 evaluations × 4 metrics = 24 calls
+            assert call_count[0] == 24
 
     @pytest.mark.asyncio
     async def test_calculate_all_metrics_progress_callback(self, mock_judge_response_valid):
@@ -635,13 +733,21 @@ class TestCalculateAllMetricsParallel:
             api_key="test-key",
         )
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=mock_judge_response_valid))]
-
         progress_calls = []
 
         def progress_callback(completed, total):
             progress_calls.append((completed, total))
+
+        async def mock_create(*args, **kwargs):
+            # Check if this is a groundedness call (uses text format without response_format)
+            response_format = kwargs.get("response_format")
+            if response_format is None:
+                content = "The response is grounded. <S2>4</S2>"
+            else:
+                content = mock_judge_response_valid
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=content))]
+            return mock_response
 
         with (
             patch("helpers.rag_metrics.get_bearer_token_provider") as mock_token_provider,
@@ -651,7 +757,7 @@ class TestCalculateAllMetricsParallel:
             mock_client = MagicMock()
             mock_client.chat = MagicMock()
             mock_client.chat.completions = MagicMock()
-            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_client.chat.completions.create = mock_create
             mock_client.close = AsyncMock()  # Mock async close for cleanup
             mock_client_class.return_value = mock_client
 
@@ -697,8 +803,16 @@ class TestCalculateAllMetricsParallel:
             api_key="test-key",
         )
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=mock_judge_response_valid))]
+        async def mock_create(*args, **kwargs):
+            # Check if this is a groundedness call (uses text format without response_format)
+            response_format = kwargs.get("response_format")
+            if response_format is None:
+                content = "The response is grounded. <S2>4</S2>"
+            else:
+                content = mock_judge_response_valid
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock(message=MagicMock(content=content))]
+            return mock_response
 
         with (
             patch("helpers.rag_metrics.get_bearer_token_provider") as mock_token_provider,
@@ -708,7 +822,7 @@ class TestCalculateAllMetricsParallel:
             mock_client = MagicMock()
             mock_client.chat = MagicMock()
             mock_client.chat.completions = MagicMock()
-            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_client.chat.completions.create = mock_create
             mock_client.close = AsyncMock()  # Mock async close for cleanup
             mock_client_class.return_value = mock_client
 

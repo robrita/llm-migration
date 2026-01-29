@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from openai import APIStatusError, AsyncAzureOpenAI, AsyncOpenAI, RateLimitError
+from openai import APIStatusError, APITimeoutError, AsyncAzureOpenAI, AsyncOpenAI, RateLimitError
 
 from helpers.llm_models import (
     DEFAULT_MAX_CONCURRENT,
@@ -197,12 +197,12 @@ async def evaluate_single(
             # Measure pure API latency - starts here, right before the API call
             api_start_time = time.time()
 
-            response = await asyncio.wait_for(
-                client.chat.completions.create(
-                    model=deployment_name,
-                    messages=messages,
-                    temperature=0.7,
-                ),
+            # Use SDK's built-in timeout instead of asyncio.wait_for to avoid
+            # "cannot schedule new futures after shutdown" when executor is closed
+            response = await client.chat.completions.create(
+                model=deployment_name,
+                messages=messages,
+                temperature=0.7,
                 timeout=timeout_seconds,
             )
 
@@ -254,7 +254,7 @@ async def evaluate_single(
                 "total_tokens": total_tokens,
             }
 
-        except TimeoutError:
+        except APITimeoutError:
             logger.warning(f"[{model.name}] Timeout on turn {turn_index + 1}")
             return {
                 "ok": False,

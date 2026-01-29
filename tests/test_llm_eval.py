@@ -229,15 +229,15 @@ class TestEvaluateSingleTimeout:
     @pytest.mark.asyncio
     async def test_timeout_handling(self, sample_model, sample_conversation, sample_page_content):
         """Test that timeout is handled gracefully."""
-        import asyncio
+        from openai import APITimeoutError
 
         from helpers.llm_eval import evaluate_single
 
         async def slow_api_call(*args, **kwargs):
-            await asyncio.sleep(10)  # Simulate slow response
-            return MagicMock()
+            # Raise APITimeoutError to simulate SDK timeout behavior
+            raise APITimeoutError(request=MagicMock())
 
-        # Create mock client with slow response
+        # Create mock client with timeout error
         mock_client = MagicMock()
         mock_client.chat = MagicMock()
         mock_client.chat.completions = MagicMock()
@@ -250,7 +250,7 @@ class TestEvaluateSingleTimeout:
             conversation=sample_conversation,
             page_content=sample_page_content,
             turn_index=0,
-            timeout_seconds=0.1,  # Very short timeout for test
+            timeout_seconds=0.1,  # Timeout value (SDK will raise APITimeoutError)
         )
 
         assert result["ok"] is False

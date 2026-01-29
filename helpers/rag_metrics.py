@@ -11,6 +11,9 @@ Provides LLM-as-judge evaluation for RAG quality metrics:
 import asyncio
 import json
 import logging
+import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
@@ -27,47 +30,64 @@ from helpers.llm_models import (
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# Prompt Templates
+# Prompt Loading
 # ============================================================================
 
-JUDGE_PROMPT_TEMPLATE = """You are an expert evaluator for RAG (Retrieval-Augmented Generation) systems.
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
-Evaluate the following response based on these criteria:
 
-1. **Groundedness** (1-5): Is the response factually grounded in the provided reference content?
-   - 1: Completely ungrounded, contradicts or ignores the source
-   - 5: Fully grounded, all claims are supported by the source
+@lru_cache(maxsize=4)
+def load_prompty(metric_name: str) -> str:
+    """
+    Load and parse a prompty file, returning the user prompt template.
 
-2. **Relevance** (1-5): Does the response directly answer the question?
-   - 1: Completely off-topic
-   - 5: Directly and completely answers the question
+    Uses Jinja2-style {{variable}} placeholders which are converted to
+    Python format-style {variable} for string formatting.
 
-3. **Coherence** (1-5): Is the response logically structured and easy to follow?
-   - 1: Incoherent, disorganized
-   - 5: Clear, well-structured, logical flow
+    Args:
+        metric_name: Name of the metric (groundedness, relevance, coherence, fluency).
 
-4. **Fluency** (1-5): Is the response grammatically correct and readable?
-   - 1: Major grammar issues, hard to read
-   - 5: Perfect grammar, natural reading
+    Returns:
+        The user prompt template string with Python format placeholders.
 
----
-{conversation_history_section}
-**Question**: {question}
+    Raises:
+        FileNotFoundError: If the prompty file doesn't exist.
+        ValueError: If the prompty file is malformed.
+    """
+    prompty_path = PROMPTS_DIR / f"{metric_name}.prompty"
 
-**Reference Content (RAG Chunk)**: {reference_content}
+    if not prompty_path.exists():
+        raise FileNotFoundError(f"Prompty file not found: {prompty_path}")
 
-**Response to evaluate**: {response}
+    content = prompty_path.read_text(encoding="utf-8")
 
----
+    # Extract user section content after "user:" marker
+    user_match = re.search(r"^user:\s*\n(.+)", content, re.MULTILINE | re.DOTALL)
+    if not user_match:
+        raise ValueError(f"No 'user:' section found in {prompty_path}")
 
-Respond with ONLY a JSON object in this exact format:
-{{
-    "groundedness": <1-5>,
-    "relevance": <1-5>,
-    "coherence": <1-5>,
-    "fluency": <1-5>
-}}
-"""
+    user_prompt = user_match.group(1).strip()
+
+    # Convert Jinja2 {{var}} to Python {var} for str.format()
+    user_prompt = re.sub(r"\{\{(\w+)\}\}", r"{\1}", user_prompt)
+
+    logger.debug(f"Loaded prompty: {metric_name}")
+    return user_prompt
+
+
+def get_metric_prompts() -> dict[str, str]:
+    """
+    Load all metric prompts from prompty files.
+
+    Returns:
+        Dict mapping metric names to their prompt templates.
+    """
+    return {
+        "groundedness": load_prompty("groundedness"),
+        "relevance": load_prompty("relevance"),
+        "coherence": load_prompty("coherence"),
+        "fluency": load_prompty("fluency"),
+    }
 
 
 # ============================================================================
@@ -137,6 +157,75 @@ def create_judge_client(
     return client, model_name
 
 
+async def calculate_single_metric(
+    metric_name: str,
+    prompt: str,
+    client: AsyncAzureOpenAI | AsyncOpenAI,
+    model_name: str,
+    use_text_format: bool = False,
+) -> dict[str, Any]:
+    """
+    Calculate a single RAG metric using LLM-as-judge.
+
+    Args:
+        metric_name: Name of the metric (groundedness, relevance, coherence, fluency).
+        prompt: The formatted prompt for this specific metric.
+        client: Async OpenAI client.
+        model_name: Model/deployment name.
+        use_text_format: If True, expect text response with <S2>score</S2> tags.
+
+    Returns:
+        Dict with:
+        - ok (bool): Whether calculation succeeded
+        - score (int): The metric score 1-5 (if ok)
+        - error (str): Error message (if not ok)
+    """
+    try:
+        if use_text_format:
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            response_text = response.choices[0].message.content
+
+            # Extract score from <S2>score</S2> tags
+            score_match = re.search(r"<S2>\s*(\d)\s*</S2>", response_text)
+            if not score_match:
+                return {"ok": False, "error": f"Missing <S2> tag in response for {metric_name}"}
+            score = int(score_match.group(1))
+        else:
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert evaluator. Respond only with JSON.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            response_text = response.choices[0].message.content
+            scores = json.loads(response_text)
+            score = scores.get("score")
+
+            if score is None:
+                return {"ok": False, "error": f"Missing 'score' in response for {metric_name}"}
+
+        logger.debug(f"Calculated {metric_name}: {score}")
+        return {"ok": True, "score": score}
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse {metric_name} response: {e}")
+        return {"ok": False, "error": f"Invalid JSON response for {metric_name}: {e}"}
+
+    except Exception as e:
+        logger.error(f"Error calculating {metric_name}: {e}")
+        return {"ok": False, "error": str(e)}
+
+
 async def calculate_metrics(
     evaluation_result: EvaluationResult,
     judge_model: LLMModel,
@@ -167,64 +256,96 @@ async def calculate_metrics(
             "error": "Cannot calculate metrics for failed evaluation",
         }
 
-    # Format conversation history for multi-turn context
-    conversation_history_section = format_conversation_history(evaluation_result.chat_history)
+    # Use provided client or create a new one
+    if client is not None and model_name is not None:
+        _client = client
+        _model_name = model_name
+    else:
+        _client, _model_name = create_judge_client(judge_model)
 
-    prompt = JUDGE_PROMPT_TEMPLATE.format(
-        conversation_history_section=conversation_history_section,
-        question=evaluation_result.question,
-        reference_content=reference_content or "No reference content provided",
-        response=evaluation_result.response,
+    # Load prompt templates from prompty files
+    metric_templates = get_metric_prompts()
+
+    # Build metric-specific prompts with tailored context
+    # Relevance uses query= for conversation history context
+    conversation_query = evaluation_result.question
+    if evaluation_result.chat_history:
+        # Format as conversation history for relevance evaluation
+        history_parts = []
+        for item in evaluation_result.chat_history:
+            history_parts.append(f"{item.role}: {item.content}")
+        history_parts.append(f"user: {evaluation_result.question}")
+        conversation_query = "\n".join(history_parts)
+
+    prompts = {
+        "groundedness": metric_templates["groundedness"].format(
+            query=evaluation_result.question,
+            context=reference_content or "No context provided",
+            response=evaluation_result.response,
+        ),
+        "relevance": metric_templates["relevance"].format(
+            query=conversation_query,
+            response=evaluation_result.response,
+        ),
+        "coherence": metric_templates["coherence"].format(
+            query=evaluation_result.question,
+            response=evaluation_result.response,
+        ),
+        "fluency": metric_templates["fluency"].format(
+            response=evaluation_result.response,
+        ),
+    }
+
+    # Track which metrics use text format (with S2 tags) vs JSON
+    text_format_metrics = {"groundedness", "coherence", "fluency"}
+
+    # Run all 4 metric calculations in parallel
+    tasks = [
+        calculate_single_metric(
+            metric_name,
+            prompt,
+            _client,
+            _model_name,
+            use_text_format=(metric_name in text_format_metrics),
+        )
+        for metric_name, prompt in prompts.items()
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Assemble results into RAGMetrics (None for failed metrics)
+    metric_scores: dict[str, float | None] = {}
+    metric_names = list(prompts.keys())
+    errors = []
+
+    for i, result in enumerate(results):
+        metric_name = metric_names[i]
+        if isinstance(result, Exception):
+            logger.error(f"Exception calculating {metric_name}: {result}")
+            metric_scores[metric_name] = None
+            errors.append(f"{metric_name}: {result}")
+        elif result.get("ok"):
+            metric_scores[metric_name] = result["score"]
+        else:
+            metric_scores[metric_name] = None
+            errors.append(f"{metric_name}: {result.get('error')}")
+
+    metrics = RAGMetrics(
+        groundedness=metric_scores.get("groundedness"),
+        relevance=metric_scores.get("relevance"),
+        coherence=metric_scores.get("coherence"),
+        fluency=metric_scores.get("fluency"),
     )
 
-    try:
-        # Use provided client or create a new one
-        if client is not None and model_name is not None:
-            _client = client
-            _model_name = model_name
-        else:
-            _client, _model_name = create_judge_client(judge_model)
+    logger.debug(
+        f"Calculated metrics for {evaluation_result.model_name}: "
+        f"G={metrics.groundedness} R={metrics.relevance} "
+        f"C={metrics.coherence} F={metrics.fluency}"
+    )
 
-        response = await _client.chat.completions.create(
-            model=_model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert evaluator. Respond only with JSON.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.1,  # Low temperature for consistent scoring
-            response_format={"type": "json_object"},
-        )
-
-        response_text = response.choices[0].message.content
-
-        # Parse JSON response
-        scores = json.loads(response_text)
-
-        metrics = RAGMetrics(
-            groundedness=scores.get("groundedness"),
-            relevance=scores.get("relevance"),
-            coherence=scores.get("coherence"),
-            fluency=scores.get("fluency"),
-        )
-
-        logger.debug(
-            f"Calculated metrics for {evaluation_result.model_name}: "
-            f"G={metrics.groundedness} R={metrics.relevance} "
-            f"C={metrics.coherence} F={metrics.fluency}"
-        )
-
+    # Return success if at least one metric was calculated
+    if any(v is not None for v in metric_scores.values()):
         return {"ok": True, "metrics": metrics}
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse judge response: {e}")
-        return {"ok": False, "error": f"Invalid JSON response from judge: {e}"}
-
-    except Exception as e:
-        logger.error(f"Error calculating metrics: {e}")
-        return {"ok": False, "error": str(e)}
+    return {"ok": False, "error": "; ".join(errors)}
 
 
 # ============================================================================

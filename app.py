@@ -1204,13 +1204,13 @@ with st.container(border=True):
                         }
                         turn_df["Conv"] = turn_df["Conversation"].map(conv_map)
 
-                        # Latency grouped bar chart
-                        fig_latency = px.bar(
+                        # Latency line chart
+                        fig_latency = px.line(
                             turn_df,
                             x="Conv",
                             y="Latency (s)",
                             color="Model",
-                            barmode="group",
+                            markers=True,
                             title=f"Latency by Conversation (Turn {selected_chart_turn})",
                             hover_data=["Conversation"],
                         )
@@ -1237,13 +1237,16 @@ with st.container(border=True):
                                 key="metric_line_chart_select",
                             )
 
-                            fig_metrics = px.bar(
+                            chart_title = (
+                                f"{metric_choice} by Conversation (Turn {selected_chart_turn})"
+                            )
+                            fig_metrics = px.line(
                                 turn_df,
                                 x="Conv",
                                 y=metric_choice,
                                 color="Model",
-                                barmode="group",
-                                title=f"{metric_choice} by Conversation (Turn {selected_chart_turn})",
+                                markers=True,
+                                title=chart_title,
                                 hover_data=["Conversation"],
                             )
                             fig_metrics.update_layout(
