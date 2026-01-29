@@ -1,0 +1,51 @@
+{
+  "dataset_id": "ds-sample001",
+  "name": "Sample Azure AI Questions",
+  "source_document": {
+    "filename": "azure_ai_overview.pdf",
+    "content": "Azure AI Services provide a comprehensive suite of AI capabilities including computer vision, natural language processing, speech services, and decision-making tools. Azure OpenAI Service offers access to advanced language models like GPT-4 and GPT-4 Turbo for text generation, code completion, and chat applications. Azure AI Search enables intelligent search over structured and unstructured data with semantic ranking and hybrid search capabilities. Azure Machine Learning provides end-to-end machine learning lifecycle management including model training, deployment, and monitoring.",
+    "page_count": 3,
+    "file_size_bytes": 125000,
+    "uploaded_at": "2024-01-15T10:00:00Z"
+  },
+  "conversations": [
+    {
+      "conversation_id": "conv-azure-001",
+      "turns": [
+        {
+          "turn_number": 1,
+          "question": "What AI capabilities does Azure provide?",
+          "ground_truth": "Azure AI Services provide a comprehensive suite of AI capabilities including computer vision, natural language processing, speech services, and decision-making tools."
+        },
+        {
+          "turn_number": 2,
+          "question": "Which language models are available through Azure OpenAI?",
+          "ground_truth": "Azure OpenAI Service offers access to advanced language models like GPT-4 and GPT-4 Turbo for text generation, code completion, and chat applications."
+        },
+        {
+          "turn_number": 3,
+          "question": "What features does Azure AI Search provide?",
+          "ground_truth": "Azure AI Search enables intelligent search over structured and unstructured data with semantic ranking and hybrid search capabilities."
+        }
+      ],
+      "selected": true
+    },
+    {
+      "conversation_id": "conv-azure-002",
+      "turns": [
+        {
+          "turn_number": 1,
+          "question": "What is Azure Machine Learning used for?",
+          "ground_truth": "Azure Machine Learning provides end-to-end machine learning lifecycle management including model training, deployment, and monitoring."
+        },
+        {
+          "turn_number": 2,
+          "question": "Can you summarize the main Azure AI services mentioned?",
+          "ground_truth": "The main Azure AI services include: Azure AI Services for vision, language, and speech; Azure OpenAI for GPT models; Azure AI Search for intelligent search; and Azure Machine Learning for ML lifecycle management."
+        }
+      ],
+      "selected": true
+    }
+  ],
+  "created_at": "2024-01-15T10:30:00Z"
+}

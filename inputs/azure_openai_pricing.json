@@ -1,0 +1,122 @@
+{
+  "GPT-4o": {
+    "input": 2.5,
+    "cached_input": 1.25,
+    "output": 10.0,
+    "context": "128K",
+    "max_output": "16,384",
+    "category": "Flagship"
+  },
+  "GPT-4o-mini": {
+    "input": 0.15,
+    "cached_input": 0.075,
+    "output": 0.6,
+    "context": "128K",
+    "max_output": "16,384",
+    "category": "Flagship"
+  },
+  "GPT-4.1": {
+    "input": 2.0,
+    "cached_input": 0.5,
+    "output": 8.0,
+    "context": "1M",
+    "max_output": "32,768",
+    "category": "Flagship"
+  },
+  "GPT-4.1-mini": {
+    "input": 0.4,
+    "cached_input": 0.1,
+    "output": 1.6,
+    "context": "1M",
+    "max_output": "32,768",
+    "category": "Flagship"
+  },
+  "GPT-4.1-nano": {
+    "input": 0.1,
+    "cached_input": 0.03,
+    "output": 0.4,
+    "context": "1M",
+    "max_output": "32,768",
+    "category": "Flagship"
+  },
+  "GPT-5": {
+    "input": 1.25,
+    "cached_input": 0.13,
+    "output": 10.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5-mini": {
+    "input": 0.25,
+    "cached_input": 0.03,
+    "output": 2.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5-nano": {
+    "input": 0.05,
+    "cached_input": 0.01,
+    "output": 0.4,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5.1": {
+    "input": 1.25,
+    "cached_input": 0.13,
+    "output": 10.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5.1-chat": {
+    "input": 1.25,
+    "cached_input": 0.13,
+    "output": 10.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5.1-codex": {
+    "input": 1.25,
+    "cached_input": 0.13,
+    "output": 10.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5.1-codex-max": {
+    "input": 1.25,
+    "cached_input": 0.13,
+    "output": 10.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5.1-codex-mini": {
+    "input": 0.25,
+    "cached_input": 0.03,
+    "output": 2.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5.2": {
+    "input": 1.75,
+    "cached_input": 0.18,
+    "output": 14.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  },
+  "GPT-5.2-chat": {
+    "input": 1.75,
+    "cached_input": 0.18,
+    "output": 14.0,
+    "context": "400K",
+    "max_output": "128K",
+    "category": "Reasoning"
+  }
+}
