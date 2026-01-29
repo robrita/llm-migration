@@ -2,6 +2,30 @@
 
 Compare multiple LLM models in parallel with standard RAG evaluation metrics. Configure up to 5 models, upload grounding documents, generate question datasets, and view comprehensive performance comparisons.
 
+![Voice Playground](img/banner-1.png)
+
+## Configure System Prompt, concurrency, retries, and more
+
+![Voice Playground](img/banner-2.png)
+
+## Upload multiple documents and generate a dataset
+
+![Voice Playground](img/banner-3.png)
+
+## Run evaluation across multiple models simultaneously
+
+![Voice Playground](img/banner-4.png)
+
+## View average latency, RAG Metrics, and even the total cost
+
+![Voice Playground](img/banner-5.png)
+
+## View RAG Metrics for each conversation turn
+
+![Voice Playground](img/banner-6.png)
+
+## Dive deep into each conversation turn
+
 ## 📋 Prerequisites
 
 - **Python 3.11+** (required for modern type hints and async features)
