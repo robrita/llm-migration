@@ -126,3 +126,72 @@ st.markdown("### Field Configuration")
 ## Typing & Lint
 - Prefer built-in generics (`list`, `dict`) over `typing.List`/`typing.Dict`.
 - Run `make lint` (Ruff) and `make format` before commits.
+
+---
+
+# Git Operations Requiring Explicit Approval
+
+**CRITICAL**: The following Git operations must NEVER be performed without explicit human approval:
+
+- `git branch -d` / `git branch -D` (delete local branch)
+- `git push origin --delete` (delete remote branch)
+- `git reset --hard` (discard commits)
+- `git push --force` / `git push -f` (force push)
+- `git rebase` on shared branches
+
+Even after a successful merge, always ask before deleting feature branches.
+
+---
+
+# Dependency Management
+
+- Add packages via `uv add <package>` (updates `pyproject.toml` and `uv.lock`)
+- Remove packages via `uv remove <package>`
+- After adding/removing, run `uv sync` to update environment
+- Pin versions for production stability when needed
+
+---
+
+# Environment Variables
+
+- Document all new env vars in `.env.example` with placeholder values
+- Never commit actual credentials to `.env` (gitignored)
+- Use descriptive names: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`
+- Group related vars with comments in `.env.example`
+
+---
+
+# Breaking Changes
+
+When making breaking changes to APIs or data schemas:
+
+- Bump version in `pyproject.toml` if applicable
+- Document migration steps in commit message or PR description
+- Update affected tests before merging
+- Notify team members if shared interfaces change
+
+---
+
+# Quality Gate Checklist (Before Merge)
+
+Complete these steps after any feature change or update, and before merging:
+
+1. **Code Quality**
+   - [ ] `make format` passes (no changes)
+   - [ ] `make lint` passes (no errors)
+
+2. **Tests**
+   - [ ] `make test-unit` passes
+   - [ ] New code has corresponding tests
+
+3. **Documentation**
+   - [ ] README.md updated if user-facing changes
+   - [ ] Docstrings added for new public functions
+
+4. **Git Hygiene**
+   - [ ] Commit messages follow conventional format (`feat:`, `fix:`, `docs:`)
+   - [ ] No secrets/credentials committed
+
+5. **Review**
+   - [ ] Self-review of diff before commit
+   - [ ] Run app locally to verify functionality
